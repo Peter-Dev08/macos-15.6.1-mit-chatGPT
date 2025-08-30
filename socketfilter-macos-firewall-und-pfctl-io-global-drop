@@ -1,0 +1,93 @@
+Perfekt 👍 – jetzt kommen wir in den Bereich Netzwerk-Hardening per pfctl und Application Firewall (socketfilterfw).
+Wir können einen Doppel-Schutz bauen:
+	1.	pfctl (Packet Filter) = Kernel-Level Firewall
+	•	Blockt alles rein und raus.
+	•	Nur explizit erlaubte Ports/Hosts (z. B. GitHub für deine Dev) dürfen durch.
+	2.	macOS Application Firewall (socketfilterfw) = App-Level Firewall
+	•	Blockt Prozesse/Apps.
+	•	Du kannst erzwingen: nur deine Dev-Tools (Terminal, Git, Homebrew, Xcode, SSH) dürfen raus.
+
+⸻
+
+🛠 Vorgehen in 2 Stufen
+
+1. pfctl-Config erstellen (z. B. /etc/pf.conf.eh)
+
+# EH-Hardening pf.conf
+# Alles blocken
+set block-policy drop
+set skip on lo0   # loopback immer erlauben
+
+block in all
+block out all
+
+# Erlauben: DNS zu deinem Resolver
+pass out proto udp from any to any port 53 keep state
+
+# Erlauben: GitHub (HTTPS)
+pass out proto tcp from any to github.com port 443 keep state
+pass out proto tcp from any to github.com port 22 keep state
+
+# Erlauben: Homebrew Taps (GitHub-hosted)
+pass out proto tcp from any to brew.sh port 443 keep state
+
+# Optional: ProtonVPN (wenn du willst)
+# pass out proto udp from any to <ProtonVPN-Server> port {500,4500,1194} keep state
+
+Dann aktivieren:
+
+sudo pfctl -f /etc/pf.conf.eh
+sudo pfctl -E
+
+2. macOS Application Firewall konfigurieren
+
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setblockall on
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/ssh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/git
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/curl
+
+Damit:
+	•	Standardmäßig block all
+	•	Nur definierte Dev-Tools können raus.
+
+⸻
+
+👉 Damit hast du ein doppeltes Netz:
+	•	pfctl blockiert auf IP/Port-Level.
+	•	socketfilterfw blockiert auf Prozess-Level.
+
+⸻
+
+Frage an dich:
+Willst du, dass ich dir ein gesamtes Automatisierungs-Skript (eh-firewall-hard.sh) baue, das beide Firewalls konfiguriert (pfctl + plist für socketfilterfw) und beim Boot automatisch setzt?
+
+Genau ✅ — wir kombinieren hier Ports (Dienste) mit Services (Prozesse/Apps), so dass doppelt abgesichert wird:
+
+🔒 Schutzebenen
+	1.	Port-/Service-Ebene (pfctl)
+	•	Blockt oder erlaubt Netzwerkdienste rein/raus nach Portnummer (z. B. 22/SSH, 443/HTTPS).
+	•	Beispiel:
+	•	block out all → alles geblockt
+	•	pass out proto tcp from any to github.com port 22 → nur GitHub-SSH-Verbindungen erlaubt.
+	2.	App-/Prozess-Ebene (socketfilterfw, macOS Firewall)
+	•	Entscheidet, welches Programm überhaupt eine Netzwerkverbindung öffnen darf.
+	•	Beispiel:
+	•	/usr/bin/git darf raus.
+	•	/System/Applications/Notes.app oder Safari → blockiert, auch wenn Port erlaubt wäre.
+
+⸻
+
+💡 Vorteil der Kombi
+	•	pfctl schützt dich gegen unerwartete Ports/Hosts.
+	•	socketfilterfw schützt dich, falls Malware über einen erlaubten Port „mitreiten“ will.
+
+⸻
+
+👉 Wenn du magst, baue ich dir ein Skript, das:
+	1.	Eine pf.conf.eh mit deinen erlaubten Ports/Services erstellt.
+	2.	Einen macOS Firewall-Setup-Block einfügt (per socketfilterfw).
+	3.	Das Ganze in ein LaunchDaemon packt, sodass es beim Boot automatisch zieht.
+
+Soll ich das gleich als eh-firewall-hard.sh vorbereiten, und wir füllen dann gemeinsam die Liste der erlaubten Ports/Services (z. B. GitHub, SSH, DNS, ProtonVPN)?
+

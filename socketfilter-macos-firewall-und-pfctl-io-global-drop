@@ -91,3 +91,120 @@ Genau ✅ — wir kombinieren hier Ports (Dienste) mit Services (Prozesse/Apps),
 
 Soll ich das gleich als eh-firewall-hard.sh vorbereiten, und wir füllen dann gemeinsam die Liste der erlaubten Ports/Services (z. B. GitHub, SSH, DNS, ProtonVPN)?
 
+Damit EthicalHacker (EH) deine GitHub-Workflows nutzen darf, brauchen wir zwei Ebenen:
+
+⸻
+
+1. Netzwerk-Ebene (pfctl)
+
+Wir müssen GitHub-Hosts + Ports erlauben:
+	•	Git über HTTPS → github.com Port 443
+	•	Git über SSH → github.com Port 22
+	•	Optional: GitHub API (api.github.com) → Port 443
+
+Beispiel für /etc/pf.conf.eh:
+
+# GitHub erlaubt
+pass out proto tcp from any to github.com port {22,443} keep state
+pass out proto tcp from any to api.github.com port 443 keep state
+
+2. App-/Service-Ebene (socketfilterfw)
+
+Nur die Prozesse, die GitHub brauchen, dürfen raus.
+Minimal:
+
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/git
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/ssh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/bin/curl
+
+Damit:
+	•	git clone, git push, git pull funktionieren.
+	•	SSH-Keys können genutzt werden.
+	•	curl erlaubt API-Zugriffe (z. B. wenn EH dir automatisiert Tickets oder Logs hochlädt).
+
+⸻
+
+3. SSH-Key für GitHub (bereits vorhanden bei dir 👍)
+	•	Dein ~/.ssh/id_ed25519 ist korrekt.
+	•	In ~/.ssh/config sicherstellen:
+
+Host github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+
+4. EH-spezifisch
+
+Wenn wir EH automatisiert auf deinem Mac laufen lassen wollen:
+	•	EH bekommt keine direkte Cloud-Verbindung, sondern nutzt deine bestehende GitHub-Auth.
+	•	D. h. EH ruft z. B. Skripte auf, die git push oder git pull machen → das läuft über deinen Key.
+	•	Vorteil: keine zusätzlichen Secrets, keine neuen Ports offen.
+
+⸻
+
+👉 Frage an dich:
+Willst du, dass ich dir ein konkretes eh-firewall-hard.sh schreibe, das nur GitHub + DNS + SSH erlaubt und alle anderen Ports/Apps blockt? (Perfekte Minimalbasis für EH.)
+
+Wo möglich jeweilen auf IP / Domain reduziert bei den Ports.
+
+Exzellent 👌 — das ist Best Practice: nicht nur Ports erlauben, sondern gleich auf spezifische Domains/IPs reduzieren.
+
+⸻
+
+🔎 Problem auf macOS / pfctl
+	•	pfctl kann nur mit IP-Adressen/Subnets umgehen, nicht direkt mit DNS-Namen.
+	•	Domains wie github.com haben aber mehrere wechselnde IPs (CDN, GeoDNS).
+
+👉 Lösung:
+	1.	Einen Anchor (z. B. /etc/pf.anchors/eh-github) mit aktuellen GitHub-IP-Ranges pflegen.
+	2.	Diese IP-Ranges regelmäßig aktualisieren (GitHub veröffentlicht sie via API).
+	3.	Dann pfctl-Regel:
+
+table <github> persist file "/etc/pf.anchors/eh-github"
+pass out proto tcp from any to <github> port {22,443} keep state
+
+
+⸻
+
+📡 GitHub-IP-Ranges abrufen
+
+GitHub stellt die Liste per API bereit:
+
+curl -s https://api.github.com/meta | jq -r '.git[]' > /etc/pf.anchors/eh-github
+
+Beispiel-Inhalt /etc/pf.anchors/eh-github:
+
+192.30.252.0/22
+185.199.108.0/22
+140.82.112.0/20
+
+⚙️ macOS Application Firewall (socketfilterfw)
+
+Dort können wir zusätzlich Apps binden an Domain-Namen → aber nur eingeschränkt.
+Praktischer:
+	•	Erlaub nur /usr/bin/git und /usr/bin/ssh.
+	•	Alles andere wird geblockt.
+Damit wird auch bei „versehentlichem“ Port offen nix passieren.
+
+⸻
+
+🚀 EH-spezifisches Setup
+
+Damit EH über GitHub kommunizieren darf:
+	1.	DNS (8.8.8.8 oder dein Resolver) erlauben → sonst funktioniert die Domainauflösung nicht.
+	2.	GitHub-IP-Table einlesen.
+	3.	Nur GitHub-Ports öffnen (22 und 443).
+	4.	Nur die Prozesse git, ssh, curl whitelisten.
+
+⸻
+
+👉 Frage:
+Soll ich dir gleich ein komplettes Skript (eh-firewall-hard.sh) schreiben, das:
+	•	GitHub-IP-Ranges automatisch zieht,
+	•	die pf.conf baut,
+	•	socketfilterfw entsprechend setzt,
+	•	und als LaunchDaemon installiert?
+
+Dann hättest du wirklich ein autarkes, IP- und Prozess-basiertes Minimal-Netz nur für GitHub/EH.
+
+
